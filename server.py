@@ -1,5 +1,6 @@
 from aiohttp import web
 
+import os
 import pint
 import ssl
 import yaml
@@ -277,8 +278,9 @@ def mqttc_create():
         username=config["mqtt"].get("username"),
         password=config["mqtt"].get("password"),
     )
-    if config["mqtt"]["cert"]:
-        mqttc.tls_set(config["mqtt"]["cert"], tls_version=ssl.PROTOCOL_TLS)
+    if config["mqtt"].get("cert"):
+        logging.info("CERT: "+config["mqtt"].get("cert"))
+        mqttc.tls_set(config["mqtt"].get("cert"), tls_version=ssl.PROTOCOL_TLS)
 
     logging.info("CALLING MQTT CONNECT")
     mqttc.connect(
