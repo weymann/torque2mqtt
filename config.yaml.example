@@ -8,3 +8,5 @@ mqtt:
   username: username
   password: password
   prefix: torque
+  cert: /etc/ssl/certs/ca-certificates.crt
+  

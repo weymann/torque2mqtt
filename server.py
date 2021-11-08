@@ -1,12 +1,13 @@
 from aiohttp import web
 
 import pint
-
+import ssl
 import yaml
 import paho.mqtt.client as mqtt
 import json
 import argparse
 import time
+import logging
 
 ureg = pint.UnitRegistry()
 
@@ -62,7 +63,11 @@ assumedFullName = {
     "31": "Distance with MIL off",
 }
 
+logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))# get an instance of the logger object this module will use
+
 data = {}
+publish_counter = 0
+published_counter = 0
 
 
 def prettyUnits(unit):
@@ -231,8 +236,17 @@ def get_data(session):
 
 def publish_data(session):
     session_data = get_data(session)
-    mqttc.publish(get_topic_prefix(session), json.dumps(session_data))
-
+    mqttc.publish(get_topic_prefix(session), json.dumps(session_data),2,True)
+    global publish_counter
+    global published_counter
+    publish_counter += 1
+    # check if publish counter grows with no feedback
+    # if yes create a new MQTT client
+    if publish_counter - published_counter > 10:
+        publish_counter = 0
+        published_counter = 0
+        logging.info("No publish results received - reconnect")
+        mqttc_create()
 
 mqttc = None
 mqttc_time = time.time()
@@ -240,17 +254,20 @@ mqttc_time = time.time()
 
 def mqtt_on_connect(client, userdata, flags, rc):
     if rc != 0:
-        print("MQTT Connection Issue")
+        logging.info("MQTT Connection Issue")
         exit()
 
 
 def mqtt_on_disconnect(client, userdata, rc):
-    print("MQTT Disconnected")
+    logging.info("MQTT Disconnected")
     if time.time() > mqttc_time + 10:
         mqttc_create()
     else:
         exit()
 
+def mqtt_on_publish(client, userdata, id):
+    global published_counter
+    published_counter += 1
 
 def mqttc_create():
     global mqttc
@@ -260,12 +277,16 @@ def mqttc_create():
         username=config["mqtt"].get("username"),
         password=config["mqtt"].get("password"),
     )
-    print("CALLING MQTT CONNECT")
+    if config["mqtt"]["cert"]:
+        mqttc.tls_set(config["mqtt"]["cert"], tls_version=ssl.PROTOCOL_TLS)
+
+    logging.info("CALLING MQTT CONNECT")
     mqttc.connect(
         config["mqtt"]["host"], config["mqtt"].get("port", 1883), keepalive=60
     )
     mqttc.on_connect = mqtt_on_connect
-    mqttc.mqtt_on_disconnect = mqtt_on_disconnect
+    mqttc.on_disconnect = mqtt_on_disconnect
+    mqttc.on_publish = mqtt_on_publish
     mqttc.loop_start()
     mqttc_time = time.time()
 
