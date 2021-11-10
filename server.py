@@ -69,6 +69,7 @@ logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))# get an instance o
 data = {}
 publish_counter = 0
 published_counter = 0
+mqttformat = "json"
 
 
 def prettyUnits(unit):
@@ -217,27 +218,38 @@ def get_topic_prefix(session):
 
 
 def get_data(session):
+    global mqttformat
     retdata = {}
-    retdata["profile"] = get_profile(session)
     retdata["time"] = data[session]["time"]
     meta = {}
 
     for key, value in data[session]["value"].items():
         row_data = get_field(session, key)
         retdata[row_data["short_name"]] = row_data["value"]
-        meta[row_data["short_name"]] = {
-            "name": row_data["name"],
-            "unit": row_data["unit"],
-        }
+        
+        if mqttformat == "json": 
+            meta[row_data["short_name"]] = {
+                "name": row_data["name"],
+                "unit": row_data["unit"],
+            }
 
-    retdata["meta"] = meta
+    if mqttformat == "json": 
+        retdata["profile"] = get_profile(session)
+        retdata["meta"] = meta
 
     return retdata
 
 
 def publish_data(session):
+    global mqttformat
     session_data = get_data(session)
-    mqttc.publish(get_topic_prefix(session), json.dumps(session_data),2,True)
+    if mqttformat == "raw":
+        logging.info("Publish mqtt values")
+        for key, value in session_data.items():
+            logging.info("Publish mqtt "+str(key)+" : "+str(value))
+    else:
+        mqttc.publish(get_topic_prefix(session), json.dumps(session_data),2,True)
+    
     global publish_counter
     global published_counter
     publish_counter += 1
@@ -316,6 +328,8 @@ if __name__ == "__main__":
     host = config.get("server", {}).get("ip", "0.0.0.0")
     port = config.get("server", {}).get("port", 5000)
 
+    mqttformat = config.get("mqtt", {}).get("port", "json")
+    
     app = web.Application()
     app.router.add_get("/", process_torque)
     web.run_app(app, host=host, port=port)
