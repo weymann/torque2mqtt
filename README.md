@@ -1,19 +1,39 @@
 # torque2mqtt
 
-With an Android Phone, the Torque App (I've only tested with Torque Pro, but I think it'll work with Torque Lite) and a OBD2 Bluetooth/Wifi Adapter, you can get data about your car (speed, location, coolant temperature, odometer reading, etc, etc) into MQTT.
+`torque2mqtt` receives vehicle data from the Torque Android app and forwards it to an MQTT broker. Torque sends data to this service as a web endpoint; the service converts the request into a retained JSON message.
 
-It’s a simple Python Service that can be used as a Torque Web Endpoint. It publishes your Torque statistics to an MQTT topic.
+The project has been tested with Torque Pro. Torque Lite may also work, but has not been verified.
 
-I don’t think it REQUIRES Torque Pro, however, I’ve not tested at all with Torque Lite. So if you try it with Lite, please let me know if it works.
+<img src="img/smartcar-openhab-widget.png" alt="Example of vehicle data displayed in an OpenHAB smart-car widget" width="50%">
 
-This is a first pass implementation. Some units can be converted to imperial, but more work is likely needed. By default, all units are metric (from Torque). Adding `imperial: True` to your config will attempt to convert to Imperial units.
+Example OpenHAB dashboard using vehicle data from MQTT.
 
-This implementation has no security, authentication, or verification.
+## Features
 
-Pull Requests are VERY welcome!
+- Publishes retained JSON messages with MQTT QoS 2.
+- Supports MQTT over TLS when `mqtt.cert` points to a CA certificate file.
+- Uses configurable Python logging; set the `LOGLEVEL` environment variable to change the log level.
+- Tracks MQTT publish acknowledgements and attempts to reconnect when acknowledgements stop arriving.
 
-# config.yaml example
+Only JSON publishing is currently functional. The `raw` code path logs values but does not publish them to MQTT.
+
+## How It Works
+
+Configure Torque to use this service as its web server endpoint. The service listens for `GET /` requests and publishes the received data to:
+
+```text
+<mqtt.prefix>/<profile-name>
 ```
+
+If Torque does not provide a profile name, the topic uses the profile email, then the Torque session ID. Names are converted to lowercase and spaces become underscores.
+
+Messages are published as retained MQTT JSON. They include the Torque timestamp, available sensor values, profile information, and sensor names and units in a `meta` object. Common OBD-II fields receive readable names when Torque does not provide them. Values use the units supplied by Torque by default.
+
+## Configuration
+
+Create a directory containing `config.yaml`. Start with this example and update the broker details:
+
+```yaml
 server:
   ip: 0.0.0.0
   port: 5000
@@ -24,35 +44,58 @@ mqtt:
   username: username
   password: password
   prefix: torque
+  # Optional CA certificate file for TLS connections:
+  # cert: /etc/ssl/certs/ca-certificates.crt
 
-imperial: True
+# Optional; converts supported distance, temperature, and speed units.
+# imperial: true
 ```
 
-# Running From Source Tree
+`server.ip` and `server.port` control the HTTP listener. `mqtt.host`, `mqtt.port`, `mqtt.username`, and `mqtt.password` configure the broker connection. `mqtt.prefix` is the first part of the published topic. Set `mqtt.cert` to a CA certificate file to enable TLS. Omit the `server` section to use `0.0.0.0:5000`.
 
-run with `python3 server.py -c /directory/containing/config.yaml`
+## Run From Source
 
-See config.yaml.example for configuration elements.
+Install the dependencies from `requirements.txt`, then pass the directory containing `config.yaml`:
 
-# Running From Docker
-
-Docker Builds are available here:
-https://hub.docker.com/r/dlashua/torque2mqtt
-
-`docker run -d -v /path/to/config:/config -p 5000:5000 dlashua/torque2mqtt`
-
-# Running with docker-compose
-
+```sh
+python3 server.py --config /path/to/config-directory
 ```
-version: "3.4"
 
+For example, if the file is `/opt/torque2mqtt/config.yaml`, pass `/opt/torque2mqtt` as the config directory.
+
+## Run With Docker
+
+The published image is available as [`dlashua/torque2mqtt`](https://hub.docker.com/r/dlashua/torque2mqtt). Mount the directory containing `config.yaml` at `/config` and expose the configured HTTP port:
+
+```sh
+docker run -d \
+  --name torque2mqtt \
+  --restart unless-stopped \
+  -p 5000:5000 \
+  -v /path/to/config:/config \
+  dlashua/torque2mqtt
+```
+
+### Docker Compose
+
+```yaml
 services:
   torque2mqtt:
     image: dlashua/torque2mqtt
-    restart: unless-stopped
     container_name: torque2mqtt
+    restart: unless-stopped
     ports:
-      - 5000:5000
+      - "5000:5000"
     volumes:
       - ./config:/config
 ```
+
+Place `config.yaml` in the local `./config` directory before starting the service.
+
+## Security
+
+The HTTP endpoint has no authentication or request verification. Do not expose it directly to the public internet; restrict access to trusted devices or place it behind a secured network boundary. Use MQTT credentials and TLS where appropriate.
+
+## Contributing
+
+Contributions and bug reports are welcome.
